@@ -4,6 +4,7 @@ import './index.css'
 import App from './qrScan.jsx'
 
 
+
 createRoot(document.getElementById('root')).render(
   <StrictMode>
     <App />
