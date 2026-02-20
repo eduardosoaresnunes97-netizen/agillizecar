@@ -1,8 +1,12 @@
-import React, { useEffect, useRef, useState, useCallback } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { initializeApp } from "firebase/app";
-import { getFirestore, doc, setDoc, getDoc, updateDoc, collection, addDoc, serverTimestamp, query, orderBy, limit, getDocs } from "firebase/firestore";
+import {
+  getFirestore, doc, setDoc, getDoc, updateDoc, collection,
+  addDoc, serverTimestamp, query, orderBy, limit, getDocs
+} from "firebase/firestore";
+import { BrowserMultiFormatReader } from "@zxing/browser";
 
-// 1. Config fora do App (Imutável)
+// ====== 1. CONFIGURAÇÃO E CONSTANTES (FORA DO APP) ======
 const firebaseConfig = {
   apiKey: "AIzaSyCWGF6yl-zNZquFQBb4Ax0i4PB8j0bCBRE",
   authDomain: "supervisao-carros.firebaseapp.com",
@@ -14,23 +18,26 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
+const SETORES = ["Entrada", "Pátio", "Oficina", "Funilaria", "Acessórios", "Lavagem", "Showroom", "Vendido"];
 const DARK = {
   bg: "#0b1220", card: "#0f1a33", border: "#1b2a4d", text: "#eef3ff",
-  blue: "#164c89", ok: "#10b981"
+  mut: "#9fb3ff", blue: "#164c89", blueH: "#1d63b4", ok: "#10b981"
 };
 
-// 2. COMPONENTES ESTÁTICOS (Essencial estar fora para não perder o foco)
-const StyledInput = ({ label, ...props }) => (
-  <div style={{ marginBottom: 15 }}>
-    {label && <label style={{ display: "block", marginBottom: 5, fontSize: 14, color: "#9fb3ff" }}>{label}</label>}
-    <input
-      {...props}
-      style={{
-        padding: 14, borderRadius: 10, border: `1px solid ${DARK.border}`,
-        background: "#0b1730", color: DARK.text, width: "100%", boxSizing: "border-box",
-        fontSize: "16px", outline: "none"
-      }}
-    />
+// ====== 2. COMPONENTES DE UI ESTÁTICOS (RESOLVE O PROBLEMA DO FOCO) ======
+const Container = ({ children }) => (
+  <div style={{ background: DARK.bg, color: DARK.text, minHeight: "100vh", width: "100%", padding: "20px", boxSizing: "border-box" }}>
+    <div style={{ maxWidth: "600px", margin: "0 auto" }}>{children}</div>
+  </div>
+);
+
+const Card = ({ title, children, style }) => (
+  <div style={{
+    background: DARK.card, border: `1px solid ${DARK.border}`,
+    borderRadius: 16, padding: 16, width: "100%", boxSizing: "border-box", marginBottom: 15, ...style
+  }}>
+    {title && <h3 style={{ margin: "0 0 12px 0", color: DARK.mut }}>{title}</h3>}
+    {children}
   </div>
 );
 
@@ -39,98 +46,203 @@ const BigButton = ({ children, onClick, color = DARK.blue, style }) => (
     onClick={onClick}
     style={{
       background: color, color: "white", border: 0, borderRadius: 12,
-      padding: "16px", fontWeight: 600, cursor: "pointer", width: "100%",
-      marginBottom: 10, ...style
+      padding: "16px", fontWeight: 600, cursor: "pointer", width: "100%", marginBottom: 10, ...style
     }}
   >
     {children}
   </button>
 );
 
-// 3. COMPONENTE PRINCIPAL
+const StyledInput = (props) => (
+  <input
+    {...props}
+    style={{
+      padding: 14, borderRadius: 10, border: `1px solid ${DARK.border}`,
+      background: "#0b1730", color: DARK.text, width: "100%", boxSizing: "border-box",
+      marginBottom: 12, fontSize: "16px", outline: "none", ...props.style
+    }}
+  />
+);
+
+// ====== 3. COMPONENTE PRINCIPAL ======
 export default function App() {
   const [view, setView] = useState("login");
   
-  // Agrupando estados para reduzir re-renders
-  const [loginData, setLoginData] = useState({ user: "", pass: "" });
-  const [carData, setCarData] = useState({ chassi: "", modelo: "", ano: "", cor: "" });
+  // Estados de Dados
+  const [loginForm, setLoginForm] = useState({ user: "", pass: "" });
+  const [carForm, setCarForm] = useState({ chassi: "", modelo: "", ano: "", cor: "" });
   const [currentUser, setCurrentUser] = useState(null);
+  
+  // Estados de Listas e Scanner
   const [lista, setLista] = useState([]);
+  const [filtro, setFiltro] = useState("");
+  const [scanResult, setScanResult] = useState("");
+  const [novoSetor, setNovoSetor] = useState(SETORES[0]);
+  const videoRef = useRef(null);
+  const scannerRef = useRef(null);
 
-  // Handler de Input Genérico que mantém o foco
-  const handleLoginChange = (e) => {
-    const { name, value } = e.target;
-    setLoginData(prev => ({ ...prev, [name]: value }));
-  };
+  // --- Handlers de Input (Estáveis) ---
+  const onLoginChange = (e) => setLoginForm(prev => ({ ...prev, [e.target.name]: e.target.value }));
+  const onCarChange = (e) => setCarForm(prev => ({ ...prev, [e.target.name]: e.target.name === "chassi" ? e.target.value.toUpperCase() : e.target.value }));
 
-  const handleCarChange = (e) => {
-    const { name, value } = e.target;
-    setCarData(prev => ({ ...prev, [name]: name === "chassi" ? value.toUpperCase() : value }));
-  };
-
-  const realizarLogin = async (e) => {
+  // --- Ações do Firebase ---
+  const handleLogin = async (e) => {
     e?.preventDefault();
-    const snap = await getDoc(doc(db, "users", loginData.user.trim()));
-    if (snap.exists() && snap.data().senha === loginData.pass) {
+    const snap = await getDoc(doc(db, "users", loginForm.user.trim()));
+    if (snap.exists() && snap.data().senha === loginForm.pass) {
       setCurrentUser({ nome: snap.data().nome, admin: snap.data().admin });
       setView("home");
-    } else {
-      alert("Erro de login");
-    }
+    } else { alert("Usuário ou senha incorretos."); }
   };
 
-  // Renderização Condicional Limpa
+  const salvarVeiculo = async () => {
+    if (!carForm.chassi || !carForm.modelo) return alert("Preencha Chassi e Modelo");
+    const id = carForm.chassi.trim().toUpperCase();
+    await setDoc(doc(doc(db, "vehicles", id)), { ...carForm, status: "Entrada", updatedAt: serverTimestamp() });
+    await addDoc(collection(db, "movements"), { chassi: id, tipo: "Entrada", user: currentUser.nome, createdAt: serverTimestamp() });
+    alert("Veículo cadastrado!");
+    setCarForm({ chassi: "", modelo: "", ano: "", cor: "" });
+  };
+
+  const carregarHistorico = async () => {
+    const q = query(collection(db, "vehicles"), orderBy("updatedAt", "desc"));
+    const snap = await getDocs(q);
+    setLista(snap.docs.map(d => d.data()));
+    setView("historico");
+  };
+
+  const carregarNotificacoes = async () => {
+    const q = query(collection(db, "movements"), orderBy("createdAt", "desc"), limit(20));
+    const snap = await getDocs(q);
+    setLista(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    setView("notificacoes");
+  };
+
+  // --- Lógica do Scanner ---
+  const ligarCamera = async () => {
+    const reader = new BrowserMultiFormatReader();
+    scannerRef.current = reader;
+    const devices = await BrowserMultiFormatReader.listVideoInputDevices();
+    reader.decodeFromVideoDevice(devices[0].deviceId, videoRef.current, (res) => {
+      if (res) setScanResult(res.text);
+    });
+  };
+
+  const atualizarStatus = async () => {
+    if (!scanResult) return alert("Leia um QR Code primeiro");
+    await updateDoc(doc(db, "vehicles", scanResult), { status: novoSetor, updatedAt: serverTimestamp() });
+    await addDoc(collection(db, "movements"), { chassi: scanResult, tipo: novoSetor, user: currentUser.nome, createdAt: serverTimestamp() });
+    alert("Status atualizado!");
+    setView("home");
+  };
+
+  // ====== RENDERIZAÇÃO DAS TELAS ======
+
   return (
-    <div style={{ background: DARK.bg, color: DARK.text, minHeight: "100vh", padding: 20, boxSizing: "border-box", fontFamily: "sans-serif" }}>
-      <div style={{ maxWidth: 500, margin: "0 auto" }}>
-        
-        {view === "login" && (
-          <div key="view-login">
-            <h1 style={{ textAlign: "center" }}>AgilizzeCar</h1>
-            <div style={{ background: DARK.card, padding: 20, borderRadius: 15, border: `1px solid ${DARK.border}` }}>
-              <StyledInput 
-                name="user"
-                placeholder="Usuário" 
-                value={loginData.user} 
-                onChange={handleLoginChange} 
-              />
-              <StyledInput 
-                name="pass"
-                type="password" 
-                placeholder="Senha" 
-                value={loginData.pass} 
-                onChange={handleLoginChange} 
-              />
-              <BigButton onClick={realizarLogin}>ENTRAR</BigButton>
-            </div>
-          </div>
-        )}
+    <Container>
+      {/* TELA DE LOGIN */}
+      {view === "login" && (
+        <div key="login-screen" style={{ marginTop: "50px" }}>
+          <h1 style={{ textAlign: "center" }}>AgilizzeCar</h1>
+          <Card title="Acesso">
+            <StyledInput name="user" placeholder="Usuário" value={loginForm.user} onChange={onLoginChange} />
+            <StyledInput name="pass" type="password" placeholder="Senha" value={loginForm.pass} onChange={onLoginChange} />
+            <BigButton onClick={handleLogin}>ENTRAR</BigButton>
+          </Card>
+        </div>
+      )}
 
-        {view === "home" && (
-          <div key="view-home">
-            <h2>Bem-vindo, {currentUser?.nome}</h2>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-              <BigButton onClick={() => setView("cadastrar")}>CADASTRAR</BigButton>
-              <BigButton onClick={() => setView("historico")}>HISTÓRICO</BigButton>
-              <BigButton onClick={() => setView("notificacoes")}>AVISOS</BigButton>
-              <BigButton color="#444" onClick={() => setView("login")}>SAIR</BigButton>
-            </div>
+      {/* TELA HOME */}
+      {view === "home" && (
+        <div key="home-screen">
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 20 }}>
+            <h2>Menu</h2>
+            <span style={{ color: DARK.mut }}>{currentUser?.nome}</span>
           </div>
-        )}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+            <BigButton onClick={() => setView("scan")}>LER QR</BigButton>
+            <BigButton onClick={() => setView("cadastrar")}>CADASTRAR</BigButton>
+            <BigButton onClick={carregarHistorico}>HISTÓRICO</BigButton>
+            <BigButton onClick={carregarNotificacoes}>NOTIFICAÇÕES</BigButton>
+          </div>
+          <BigButton color="#444" onClick={() => setView("login")} style={{ marginTop: 20 }}>SAIR</BigButton>
+        </div>
+      )}
 
-        {view === "cadastrar" && (
-          <div key="view-cad">
-            <h2>Novo Cadastro</h2>
-            <StyledInput name="chassi" label="Chassi" value={carData.chassi} onChange={handleCarChange} />
-            <StyledInput name="modelo" label="Modelo" value={carData.modelo} onChange={handleCarChange} />
-            <StyledInput name="ano" label="Ano" value={carData.ano} onChange={handleCarChange} />
-            <StyledInput name="cor" label="Cor" value={carData.cor} onChange={handleCarChange} />
-            <BigButton color={DARK.ok} onClick={() => alert("Salvando...")}>SALVAR</BigButton>
+      {/* TELA CADASTRAR */}
+      {view === "cadastrar" && (
+        <div key="cad-screen">
+          <h2>Novo Veículo</h2>
+          <Card>
+            <StyledInput name="chassi" placeholder="Chassi" value={carForm.chassi} onChange={onCarChange} />
+            <StyledInput name="modelo" placeholder="Modelo" value={carForm.modelo} onChange={onCarChange} />
+            <StyledInput name="ano" placeholder="Ano" value={carForm.ano} onChange={onCarChange} />
+            <StyledInput name="cor" placeholder="Cor" value={carForm.cor} onChange={onCarChange} />
+            <BigButton color={DARK.ok} onClick={salvarVeiculo}>SALVAR NO SISTEMA</BigButton>
             <BigButton color="#555" onClick={() => setView("home")}>VOLTAR</BigButton>
-          </div>
-        )}
+          </Card>
+        </div>
+      )}
 
-      </div>
-    </div>
+      {/* TELA SCANNER */}
+      {view === "scan" && (
+        <div key="scan-screen">
+          <h2>Scanner QR</h2>
+          <Card>
+            <video ref={videoRef} style={{ width: "100%", borderRadius: 12, background: "#000", marginBottom: 15 }} />
+            {!scanResult && <BigButton onClick={ligarCamera}>LIGAR CÂMERA</BigButton>}
+            
+            {scanResult && (
+              <>
+                <p>Veículo: <b>{scanResult}</b></p>
+                <select 
+                  value={novoSetor} 
+                  onChange={(e) => setNovoSetor(e.target.value)}
+                  style={{ width: "100%", padding: 14, borderRadius: 10, background: "#0b1730", color: "#fff", marginBottom: 15 }}
+                >
+                  {SETORES.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+                <BigButton color={DARK.ok} onClick={atualizarStatus}>CONFIRMAR MUDANÇA</BigButton>
+              </>
+            )}
+            <BigButton color="#555" onClick={() => { scannerRef.current?.reset(); setView("home"); }}>VOLTAR</BigButton>
+          </Card>
+        </div>
+      )}
+
+      {/* TELA HISTÓRICO */}
+      {view === "historico" && (
+        <div key="hist-screen">
+          <h2>Estoque Atual</h2>
+          <StyledInput placeholder="Filtrar chassi..." value={filtro} onChange={(e) => setFiltro(e.target.value.toUpperCase())} />
+          {lista.filter(v => v.chassi.includes(filtro)).map((v, i) => (
+            <Card key={i} style={{ borderLeft: `4px solid ${DARK.blue}` }}>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <b>{v.modelo}</b>
+                <span style={{ color: DARK.ok, fontSize: "14px" }}>{v.status}</span>
+              </div>
+              <div style={{ fontSize: "12px", color: DARK.mut }}>ID: {v.chassi}</div>
+            </Card>
+          ))}
+          <BigButton color="#555" onClick={() => setView("home")}>VOLTAR</BigButton>
+        </div>
+      )}
+
+      {/* TELA NOTIFICAÇÕES */}
+      {view === "notificacoes" && (
+        <div key="notif-screen">
+          <h2>Últimas Atividades</h2>
+          {lista.map((m) => (
+            <Card key={m.id}>
+              <div style={{ fontSize: "14px" }}>🚗 <b>{m.chassi}</b> → <b style={{ color: DARK.mut }}>{m.tipo}</b></div>
+              <div style={{ fontSize: "11px", color: "#666", marginTop: 5 }}>
+                Por: {m.user} | {m.createdAt?.toDate().toLocaleString()}
+              </div>
+            </Card>
+          ))}
+          <BigButton color="#555" onClick={() => setView("home")}>VOLTAR</BigButton>
+        </div>
+      )}
+    </Container>
   );
 }
