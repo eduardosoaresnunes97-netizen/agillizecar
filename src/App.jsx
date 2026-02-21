@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { initializeApp } from "firebase/app";
+import { initializeApp } from "firebase/App";
 import {
   getFirestore, doc, setDoc, getDoc, updateDoc, deleteDoc, collection,
   addDoc, serverTimestamp, query, orderBy, getDocs
@@ -19,7 +19,7 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
+const db = getFirestore(App);
 
 const SETORES = ["Entrada", "Pátio", "Oficina", "Funilaria", "Acessórios", "Lavagem", "Showroom", "Vendido"];
 const DARK = {
