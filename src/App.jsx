@@ -6,6 +6,7 @@ import {
 } from "firebase/firestore";
 import { BrowserMultiFormatReader } from "@zxing/browser";
 import { jsPDF } from "jspdf";
+import QRCode from "qrcode";
 
 // ====== Configuração Firebase ======
 const firebaseConfig = {
@@ -16,6 +17,7 @@ const firebaseConfig = {
   messagingSenderId: "1047325925193",
   appId: "1:1047325925193:web:48e1bb7d04c9303f410498"
 };
+
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
@@ -62,50 +64,66 @@ export default function App() {
   const handleLogin = async (e) => {
     e?.preventDefault();
     if (!userInput) return alert("Digite o usuário");
+    const idBusca = userInput.trim().toLowerCase();
     try {
-      const snap = await getDoc(doc(db, "users", userInput.trim().toLowerCase()));
+      const snap = await getDoc(doc(db, "users", idBusca));
       if (snap.exists() && snap.data().senha === password) {
         setCurrentUser({ nome: snap.data().nome, admin: !!snap.data().admin });
         setView("home");
-      } else { alert("Login ou senha incorretos!"); }
-    } catch (err) { alert("Erro ao conectar: " + err.message); }
-  };
-
-  const carregarUsuarios = async () => {
-    const s = await getDocs(collection(db, "users"));
-    setLista(s.docs.map(d => d.data()));
-    setView("usuarios");
+      } else { alert("Usuário ou senha incorretos!"); }
+    } catch (err) { alert("Erro de conexão com o banco."); }
   };
 
   const salvarNovoUsuario = async () => {
     if (!newUser || !newPass) return alert("Preencha nome e senha!");
-    const loginFormatado = newUser.trim().toLowerCase();
+    const idUsuario = newUser.trim().toLowerCase();
     try {
-      await setDoc(doc(db, "users", loginFormatado), {
+      await setDoc(doc(db, "users", idUsuario), {
         nome: newUser.trim(),
         senha: newPass,
         admin: newIsAdmin,
         createdAt: serverTimestamp()
       });
-      alert("Usuário cadastrado!");
+      alert("Usuário cadastrado com sucesso!");
       setNewUser(""); setNewPass(""); setNewIsAdmin(false);
-      carregarUsuarios();
-    } catch (e) { alert("Erro: " + e.message); }
+      const s = await getDocs(collection(db, "users"));
+      setLista(s.docs.map(d => d.data()));
+    } catch (e) { alert("Erro ao criar usuário."); }
   };
 
   const gerarPDF = async (carro) => {
-    const { default: QRCode } = await import("qrcode");
-    const doc = new jsPDF({ unit: "mm", format: [80, 80] });
-    const qrData = await QRCode.toDataURL(carro.chassi);
-    doc.setFontSize(10);
-    doc.text("AGILIZZECAR", 40, 10, { align: "center" });
-    doc.addImage(qrData, "PNG", 15, 15, 50, 50);
-    doc.text(`CHASSI: ${carro.chassi}`, 40, 70, { align: "center" });
-    doc.save(`Etiqueta_${carro.chassi}.pdf`);
+    try {
+      const docPDF = new jsPDF({ unit: "mm", format: [80, 80] });
+      const qrData = await QRCode.toDataURL(carro.chassi);
+      docPDF.setFontSize(10);
+      docPDF.text("AGILIZZECAR", 40, 10, { align: "center" });
+      docPDF.addImage(qrData, "PNG", 15, 15, 50, 50);
+      docPDF.text(`CHASSI: ${carro.chassi}`, 40, 70, { align: "center" });
+      docPDF.save(`Etiqueta_${carro.chassi}.pdf`);
+    } catch (err) { alert("Erro ao gerar QR Code."); }
+  };
+
+  const salvarVeiculo = async () => {
+    const idChassi = chassi.trim().toUpperCase();
+    if (!idChassi) return alert("O Chassi é obrigatório!");
+    try {
+      const dados = { chassi: idChassi, modelo, ano, cor, status: "Entrada", updatedAt: serverTimestamp() };
+      await setDoc(doc(db, "vehicles", idChassi), dados);
+      await addDoc(collection(db, "movements"), { 
+        chassi: idChassi, 
+        tipo: "Entrada", 
+        user: currentUser.nome, 
+        createdAt: serverTimestamp() 
+      });
+      alert("Veículo registrado!");
+      if (window.confirm("Gerar QR Code agora?")) gerarPDF(dados);
+      setChassi(""); setModelo(""); setAno(""); setCor("");
+      irParaHome();
+    } catch (e) { alert("Erro ao salvar veículo."); }
   };
 
   const containerStyle = {
-    background: DARK.bg, color: DARK.text, minHeight: "100vh", width: "100%",
+    background: DARK.bg, color: DARK.text, minHeight: "100dvh", width: "100%",
     padding: "calc(env(safe-area-inset-top) + 20px) 20px 40px 20px",
     display: "flex", flexDirection: "column", boxSizing: "border-box"
   };
@@ -122,7 +140,7 @@ export default function App() {
 
   const btnStyle = (color) => ({
     width: "100%", padding: "18px", background: color || DARK.blue, color: "#fff",
-    border: "none", borderRadius: "12px", fontWeight: "bold", fontSize: "16px", marginBottom: "10px", cursor: "pointer"
+    border: "none", borderRadius: "12px", fontWeight: "bold", fontSize: "16px", marginBottom: "10px"
   });
 
   return (
@@ -142,9 +160,7 @@ export default function App() {
 
         {view === "home" && (
           <>
-            <div style={{ marginBottom: "20px" }}>
-              <h2>Olá, {currentUser?.nome}</h2>
-            </div>
+            <h2 style={{ marginBottom: "20px" }}>Menu</h2>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
               <button style={btnStyle()} onClick={() => setView("scan")}>LER QR</button>
               <button style={btnStyle()} onClick={() => setView("cadastrar")}>CADASTRAR</button>
@@ -153,73 +169,52 @@ export default function App() {
                 setLista(s.docs.map(d => d.data()));
                 setView("historico");
               }}>ESTOQUE</button>
-              <button style={btnStyle()} onClick={async () => {
-                const s = await getDocs(query(collection(db, "movements"), orderBy("createdAt", "desc"), limit(20)));
-                setLista(s.docs.map(d => ({ id: d.id, ...d.data() })));
-                setView("notificacoes");
-              }}>AVISOS</button>
+              <button style={btnStyle(DARK.orange)} onClick={async () => {
+                const s = await getDocs(collection(db, "users"));
+                setLista(s.docs.map(d => d.data()));
+                setView("usuarios");
+              }}>USUÁRIOS</button>
             </div>
-
-            {/* BOTÃO LIBERADO PARA TODOS TESTAREM NA VERCEL */}
-            <button style={btnStyle(DARK.orange)} onClick={carregarUsuarios}>
-              GESTÃO DE USUÁRIOS
-            </button>
-
             <button style={{ ...btnStyle("#444"), marginTop: "30px" }} onClick={() => setView("login")}>SAIR</button>
           </>
+        )}
+
+        {view === "cadastrar" && (
+          <div style={cardStyle}>
+            <h3>Novo Cadastro</h3>
+            <input placeholder="Chassi" style={inputStyle} value={chassi} onChange={e => setChassi(e.target.value.toUpperCase())} />
+            <input placeholder="Modelo" style={inputStyle} value={modelo} onChange={e => setModelo(e.target.value)} />
+            <input placeholder="Ano" style={inputStyle} value={ano} onChange={e => setAno(e.target.value)} />
+            <input placeholder="Cor" style={inputStyle} value={cor} onChange={e => setCor(e.target.value)} />
+            <button style={btnStyle(DARK.ok)} onClick={salvarVeiculo}>SALVAR VEÍCULO</button>
+            <button style={btnStyle("#555")} onClick={irParaHome}>VOLTAR</button>
+          </div>
         )}
 
         {view === "usuarios" && (
           <>
             <h3>Gestão de Usuários</h3>
             <div style={cardStyle}>
-              <input placeholder="Novo Login" style={inputStyle} value={newUser} onChange={e => setNewUser(e.target.value)} />
+              <input placeholder="Login" style={inputStyle} value={newUser} onChange={e => setNewUser(e.target.value)} />
               <input placeholder="Senha" style={inputStyle} value={newPass} onChange={e => setNewPass(e.target.value)} />
               <label style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "15px" }}>
-                <input type="checkbox" checked={newIsAdmin} onChange={e => setNewIsAdmin(e.target.checked)} />
-                É Administrador?
+                <input type="checkbox" checked={newIsAdmin} onChange={e => setNewIsAdmin(e.target.checked)} /> Admin?
               </label>
-              <button style={btnStyle(DARK.ok)} onClick={salvarNovoUsuario}>CRIAR CONTA</button>
+              <button style={btnStyle(DARK.ok)} onClick={salvarNovoUsuario}>CADASTRAR</button>
             </div>
-            {lista.map((u, i) => (
-              <div key={i} style={{ ...cardStyle, padding: "12px", marginBottom: "8px", display: "flex", justifyContent: "space-between" }}>
-                <span>{u.nome}</span>
-                <span style={{ fontSize: "12px", color: DARK.mut }}>{u.admin ? "👑 Admin" : "Operador"}</span>
-              </div>
-            ))}
             <button style={btnStyle("#555")} onClick={irParaHome}>VOLTAR</button>
           </>
-        )}
-
-        {view === "cadastrar" && (
-          <div style={cardStyle}>
-            <h3>Novo Veículo</h3>
-            <input placeholder="Chassi" style={inputStyle} value={chassi} onChange={e => setChassi(e.target.value.toUpperCase())} />
-            <input placeholder="Modelo" style={inputStyle} onChange={e => setModelo(e.target.value)} />
-            <input placeholder="Ano" style={inputStyle} onChange={e => setAno(e.target.value)} />
-            <input placeholder="Cor" style={inputStyle} onChange={e => setCor(e.target.value)} />
-            <button style={btnStyle(DARK.ok)} onClick={async () => {
-              const id = chassi.trim();
-              if(!id) return alert("Chassi obrigatório");
-              const d = { chassi: id, modelo, ano, cor, status: "Entrada", updatedAt: serverTimestamp() };
-              await setDoc(doc(db, "vehicles", id), d);
-              await addDoc(collection(db, "movements"), { chassi: id, tipo: "Entrada", user: currentUser.nome, createdAt: serverTimestamp() });
-              if (window.confirm("Salvo! Baixar PDF?")) gerarPDF(d);
-              irParaHome();
-            }}>SALVAR VEÍCULO</button>
-            <button style={btnStyle("#555")} onClick={irParaHome}>VOLTAR</button>
-          </div>
         )}
 
         {view === "historico" && (
           <>
             <h3>Estoque</h3>
-            <input placeholder="Buscar Chassi..." style={inputStyle} onChange={e => setFiltro(e.target.value.toUpperCase())} />
+            <input placeholder="Filtrar..." style={inputStyle} onChange={e => setFiltro(e.target.value.toUpperCase())} />
             {lista.filter(v => v.chassi.includes(filtro)).map((v, i) => (
               <div key={i} style={cardStyle}>
                 <b>{v.modelo}</b> - {v.status}
                 <div style={{ fontSize: "12px", color: DARK.mut }}>{v.chassi}</div>
-                <button style={{ ...btnStyle(DARK.blue), padding: "8px", marginTop: "10px", fontSize: "12px" }} onClick={() => gerarPDF(v)}>REIMPRIMIR ETIQUETA</button>
+                <button style={{ ...btnStyle(DARK.blue), padding: "8px", marginTop: "10px", fontSize: "12px" }} onClick={() => gerarPDF(v)}>ETIQUETA</button>
               </div>
             ))}
             <button style={btnStyle("#555")} onClick={irParaHome}>VOLTAR</button>
@@ -229,33 +224,29 @@ export default function App() {
         {view === "scan" && (
           <div style={cardStyle}>
             <h3>Scanner</h3>
-            <video ref={videoRef} style={{ width: "100%", borderRadius: "12px", marginBottom: "15px", background: "#000" }} />
+            <video ref={videoRef} style={{ width: "100%", borderRadius: "12px", background: "#000" }} />
             {!scanText && <button style={btnStyle()} onClick={async () => {
               const reader = new BrowserMultiFormatReader();
               scannerRef.current = reader;
               const devices = await BrowserMultiFormatReader.listVideoInputDevices();
-              if(!devices.length) return alert("Câmera não encontrada");
               reader.decodeFromVideoDevice(devices[0].deviceId, videoRef.current, (res) => { if (res) setScanText(res.text); });
             }}>LIGAR CÂMERA</button>}
-            
             {scanText && (
-              <div>
+              <div style={{marginTop: "15px"}}>
                 <p>Chassi: <b>{scanText}</b></p>
                 <select style={inputStyle} value={setorEscolhido} onChange={e => setSetorEscolhido(e.target.value)}>
                    {SETORES.map(s => <option key={s} value={s}>{s}</option>)}
                 </select>
                 <button style={btnStyle(DARK.ok)} onClick={async () => {
                    await updateDoc(doc(db, "vehicles", scanText), { status: setorEscolhido, updatedAt: serverTimestamp() });
-                   await addDoc(collection(db, "movements"), { chassi: scanText, tipo: setorEscolhido, user: currentUser.nome, createdAt: serverTimestamp() });
-                   alert("Atualizado!");
+                   alert("Status Atualizado!");
                    irParaHome();
-                }}>CONFIRMAR MUDANÇA</button>
+                }}>CONFIRMAR</button>
               </div>
             )}
             <button style={btnStyle("#555")} onClick={irParaHome}>VOLTAR</button>
           </div>
         )}
-
       </div>
     </div>
   );
