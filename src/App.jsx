@@ -31,7 +31,6 @@ export default function App() {
   const [userInput, setUserInput] = useState("");
   const [password, setPassword] = useState("");
   
-  // Estados de Cadastro e Listas
   const [chassi, setChassi] = useState("");
   const [modelo, setModelo] = useState("");
   const [ano, setAno] = useState("");
@@ -39,21 +38,17 @@ export default function App() {
   const [lista, setLista] = useState([]);
   const [filtro, setFiltro] = useState("");
   
-  // Estados de Usuários (Criação)
   const [newUser, setNewUser] = useState("");
   const [newPass, setNewPass] = useState("");
   const [newIsAdmin, setNewIsAdmin] = useState(false);
 
-  // Scanner
   const [scanText, setScanText] = useState("");
   const [setorEscolhido, setSetorEscolhido] = useState(SETORES[0]);
   const videoRef = useRef(null);
   const scannerRef = useRef(null);
 
-  // Forçar scroll para o topo ao mudar de tela
   useEffect(() => { window.scrollTo(0, 0); }, [view]);
 
-  // Função Voltar Segura
   const irParaHome = () => {
     if (scannerRef.current) {
       scannerRef.current.reset();
@@ -64,15 +59,16 @@ export default function App() {
     setView("home");
   };
 
-  // ====== Lógica de Usuários ======
   const handleLogin = async (e) => {
     e?.preventDefault();
     if (!userInput) return alert("Digite o usuário");
-    const snap = await getDoc(doc(db, "users", userInput.trim()));
-    if (snap.exists() && snap.data().senha === password) {
-      setCurrentUser({ nome: snap.data().nome, admin: !!snap.data().admin });
-      setView("home");
-    } else { alert("Login ou senha incorretos!"); }
+    try {
+      const snap = await getDoc(doc(db, "users", userInput.trim().toLowerCase()));
+      if (snap.exists() && snap.data().senha === password) {
+        setCurrentUser({ nome: snap.data().nome, admin: !!snap.data().admin });
+        setView("home");
+      } else { alert("Login ou senha incorretos!"); }
+    } catch (err) { alert("Erro ao conectar: " + err.message); }
   };
 
   const carregarUsuarios = async () => {
@@ -84,17 +80,17 @@ export default function App() {
   const salvarNovoUsuario = async () => {
     if (!newUser || !newPass) return alert("Preencha nome e senha!");
     const loginFormatado = newUser.trim().toLowerCase();
-    
-    await setDoc(doc(db, "users", loginFormatado), {
-      nome: newUser.trim(),
-      senha: newPass,
-      admin: newIsAdmin,
-      createdAt: serverTimestamp()
-    });
-    
-    alert("Usuário " + newUser + " cadastrado!");
-    setNewUser(""); setNewPass(""); setNewIsAdmin(false);
-    carregarUsuarios(); // Atualiza a lista na tela
+    try {
+      await setDoc(doc(db, "users", loginFormatado), {
+        nome: newUser.trim(),
+        senha: newPass,
+        admin: newIsAdmin,
+        createdAt: serverTimestamp()
+      });
+      alert("Usuário cadastrado!");
+      setNewUser(""); setNewPass(""); setNewIsAdmin(false);
+      carregarUsuarios();
+    } catch (e) { alert("Erro: " + e.message); }
   };
 
   const gerarPDF = async (carro) => {
@@ -108,7 +104,6 @@ export default function App() {
     doc.save(`Etiqueta_${carro.chassi}.pdf`);
   };
 
-  // ====== Estilos para Mobile / AppCreator24 ======
   const containerStyle = {
     background: DARK.bg, color: DARK.text, minHeight: "100vh", width: "100%",
     padding: "calc(env(safe-area-inset-top) + 20px) 20px 40px 20px",
@@ -134,7 +129,6 @@ export default function App() {
     <div style={containerStyle}>
       <div style={{ maxWidth: "500px", width: "100%", margin: "0 auto" }}>
         
-        {/* LOGIN */}
         {view === "login" && (
           <div style={{ paddingTop: "5vh" }}>
             <h1 style={{ textAlign: "center", marginBottom: "30px" }}>AgilizzeCar</h1>
@@ -146,12 +140,10 @@ export default function App() {
           </div>
         )}
 
-        {/* MENU PRINCIPAL */}
         {view === "home" && (
           <>
             <div style={{ marginBottom: "20px" }}>
               <h2>Olá, {currentUser?.nome}</h2>
-              <p style={{ color: DARK.mut }}>{currentUser?.admin ? "Painel Administrativo" : "Operador"}</p>
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
               <button style={btnStyle()} onClick={() => setView("scan")}>LER QR</button>
@@ -168,23 +160,20 @@ export default function App() {
               }}>AVISOS</button>
             </div>
 
-            {currentUser?.admin && (
-              <button style={btnStyle(DARK.orange)} onClick={carregarUsuarios}>
-                GESTÃO DE USUÁRIOS
-              </button>
-            )}
+            {/* BOTÃO LIBERADO PARA TODOS TESTAREM NA VERCEL */}
+            <button style={btnStyle(DARK.orange)} onClick={carregarUsuarios}>
+              GESTÃO DE USUÁRIOS
+            </button>
 
             <button style={{ ...btnStyle("#444"), marginTop: "30px" }} onClick={() => setView("login")}>SAIR</button>
           </>
         )}
 
-        {/* GESTÃO DE USUÁRIOS */}
         {view === "usuarios" && (
           <>
             <h3>Gestão de Usuários</h3>
             <div style={cardStyle}>
-              <p style={{marginBottom: "10px"}}>Novo Funcionário:</p>
-              <input placeholder="Login" style={inputStyle} value={newUser} onChange={e => setNewUser(e.target.value)} />
+              <input placeholder="Novo Login" style={inputStyle} value={newUser} onChange={e => setNewUser(e.target.value)} />
               <input placeholder="Senha" style={inputStyle} value={newPass} onChange={e => setNewPass(e.target.value)} />
               <label style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "15px" }}>
                 <input type="checkbox" checked={newIsAdmin} onChange={e => setNewIsAdmin(e.target.checked)} />
@@ -192,8 +181,6 @@ export default function App() {
               </label>
               <button style={btnStyle(DARK.ok)} onClick={salvarNovoUsuario}>CRIAR CONTA</button>
             </div>
-
-            <p style={{margin: "10px 0"}}>Usuários Ativos:</p>
             {lista.map((u, i) => (
               <div key={i} style={{ ...cardStyle, padding: "12px", marginBottom: "8px", display: "flex", justifyContent: "space-between" }}>
                 <span>{u.nome}</span>
@@ -204,7 +191,6 @@ export default function App() {
           </>
         )}
 
-        {/* CADASTRO DE VEÍCULO */}
         {view === "cadastrar" && (
           <div style={cardStyle}>
             <h3>Novo Veículo</h3>
@@ -225,7 +211,6 @@ export default function App() {
           </div>
         )}
 
-        {/* ESTOQUE */}
         {view === "historico" && (
           <>
             <h3>Estoque</h3>
@@ -241,7 +226,6 @@ export default function App() {
           </>
         )}
 
-        {/* SCANNER */}
         {view === "scan" && (
           <div style={cardStyle}>
             <h3>Scanner</h3>
