@@ -22,7 +22,7 @@ const db = getFirestore(app);
 const SETORES = ["Entrada", "Pátio", "Oficina", "Funilaria", "Acessórios", "Lavagem", "Showroom", "Vendido"];
 const DARK = {
   bg: "#0b1220", card: "#0f1a33", border: "#1b2a4d", text: "#eef3ff",
-  mut: "#9fb3ff", blue: "#164c89", ok: "#10b981", danger: "#ff4444"
+  mut: "#9fb3ff", blue: "#164c89", ok: "#10b981", orange: "#ff9800"
 };
 
 export default function App() {
@@ -39,7 +39,7 @@ export default function App() {
   const [lista, setLista] = useState([]);
   const [filtro, setFiltro] = useState("");
   
-  // Estados de Usuários
+  // Estados de Usuários (Criação)
   const [newUser, setNewUser] = useState("");
   const [newPass, setNewPass] = useState("");
   const [newIsAdmin, setNewIsAdmin] = useState(false);
@@ -50,11 +50,10 @@ export default function App() {
   const videoRef = useRef(null);
   const scannerRef = useRef(null);
 
-  // Reset de scroll e limpeza de processos ao mudar de tela
-  useEffect(() => {
-    window.scrollTo(0, 0);
-  }, [view]);
+  // Forçar scroll para o topo ao mudar de tela
+  useEffect(() => { window.scrollTo(0, 0); }, [view]);
 
+  // Função Voltar Segura
   const irParaHome = () => {
     if (scannerRef.current) {
       scannerRef.current.reset();
@@ -63,6 +62,39 @@ export default function App() {
     setScanText("");
     setFiltro("");
     setView("home");
+  };
+
+  // ====== Lógica de Usuários ======
+  const handleLogin = async (e) => {
+    e?.preventDefault();
+    if (!userInput) return alert("Digite o usuário");
+    const snap = await getDoc(doc(db, "users", userInput.trim()));
+    if (snap.exists() && snap.data().senha === password) {
+      setCurrentUser({ nome: snap.data().nome, admin: !!snap.data().admin });
+      setView("home");
+    } else { alert("Login ou senha incorretos!"); }
+  };
+
+  const carregarUsuarios = async () => {
+    const s = await getDocs(collection(db, "users"));
+    setLista(s.docs.map(d => d.data()));
+    setView("usuarios");
+  };
+
+  const salvarNovoUsuario = async () => {
+    if (!newUser || !newPass) return alert("Preencha nome e senha!");
+    const loginFormatado = newUser.trim().toLowerCase();
+    
+    await setDoc(doc(db, "users", loginFormatado), {
+      nome: newUser.trim(),
+      senha: newPass,
+      admin: newIsAdmin,
+      createdAt: serverTimestamp()
+    });
+    
+    alert("Usuário " + newUser + " cadastrado!");
+    setNewUser(""); setNewPass(""); setNewIsAdmin(false);
+    carregarUsuarios(); // Atualiza a lista na tela
   };
 
   const gerarPDF = async (carro) => {
@@ -76,85 +108,35 @@ export default function App() {
     doc.save(`Etiqueta_${carro.chassi}.pdf`);
   };
 
-  const handleLogin = async (e) => {
-    e?.preventDefault();
-    const snap = await getDoc(doc(db, "users", userInput.trim()));
-    if (snap.exists() && snap.data().senha === password) {
-      setCurrentUser({ nome: snap.data().nome, admin: !!snap.data().admin });
-      setView("home");
-    } else { alert("Login ou senha incorretos!"); }
-  };
-
-  const createUser = async () => {
-    if (!newUser || !newPass) return alert("Preencha os campos!");
-    await setDoc(doc(db, "users", newUser.trim()), {
-      nome: newUser.trim(),
-      senha: newPass,
-      admin: newIsAdmin,
-      createdAt: serverTimestamp()
-    });
-    alert("Usuário criado com sucesso!");
-    setNewUser(""); setNewPass(""); setNewIsAdmin(false);
-    // Atualiza a lista
-    const s = await getDocs(collection(db, "users"));
-    setLista(s.docs.map(d => d.data()));
-  };
-
-  // ====== ESTILOS OTIMIZADOS PARA APP (WEBVIEW) ======
+  // ====== Estilos para Mobile / AppCreator24 ======
   const containerStyle = {
-    background: DARK.bg,
-    color: DARK.text,
-    minHeight: "100vh",
-    width: "100%",
-    // Suporte para entalhes de câmera (Notch) no celular
-    padding: "calc(env(safe-area-inset-top) + 20px) 20px calc(env(safe-area-inset-bottom) + 20px) 20px",
-    display: "flex",
-    flexDirection: "column",
-    boxSizing: "border-box"
+    background: DARK.bg, color: DARK.text, minHeight: "100vh", width: "100%",
+    padding: "calc(env(safe-area-inset-top) + 20px) 20px 40px 20px",
+    display: "flex", flexDirection: "column", boxSizing: "border-box"
   };
 
   const cardStyle = {
-    background: DARK.card,
-    border: `1px solid ${DARK.border}`,
-    borderRadius: "16px",
-    padding: "20px",
-    marginBottom: "15px",
-    width: "100%",
-    boxSizing: "border-box"
+    background: DARK.card, border: `1px solid ${DARK.border}`,
+    borderRadius: "16px", padding: "20px", marginBottom: "15px", width: "100%", boxSizing: "border-box"
   };
 
   const inputStyle = {
-    width: "100%",
-    padding: "16px",
-    marginBottom: "12px",
-    borderRadius: "10px",
-    border: `1px solid ${DARK.border}`,
-    background: "#0b1730",
-    color: "#fff",
-    fontSize: "16px",
-    boxSizing: "border-box"
+    width: "100%", padding: "16px", marginBottom: "12px", borderRadius: "10px",
+    border: `1px solid ${DARK.border}`, background: "#0b1730", color: "#fff", fontSize: "16px", boxSizing: "border-box"
   };
 
   const btnStyle = (color) => ({
-    width: "100%",
-    padding: "18px",
-    background: color || DARK.blue,
-    color: "#fff",
-    border: "none",
-    borderRadius: "12px",
-    fontWeight: "bold",
-    fontSize: "16px",
-    marginBottom: "10px",
-    cursor: "pointer",
-    touchAction: "manipulation"
+    width: "100%", padding: "18px", background: color || DARK.blue, color: "#fff",
+    border: "none", borderRadius: "12px", fontWeight: "bold", fontSize: "16px", marginBottom: "10px", cursor: "pointer"
   });
 
   return (
     <div style={containerStyle}>
       <div style={{ maxWidth: "500px", width: "100%", margin: "0 auto" }}>
         
+        {/* LOGIN */}
         {view === "login" && (
-          <div style={{ paddingTop: "10vh" }}>
+          <div style={{ paddingTop: "5vh" }}>
             <h1 style={{ textAlign: "center", marginBottom: "30px" }}>AgilizzeCar</h1>
             <div style={cardStyle}>
               <input placeholder="Usuário" style={inputStyle} onChange={e => setUserInput(e.target.value)} />
@@ -164,11 +146,12 @@ export default function App() {
           </div>
         )}
 
+        {/* MENU PRINCIPAL */}
         {view === "home" && (
           <>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
-              <h2>Menu</h2>
-              <span style={{ color: DARK.mut }}>{currentUser?.nome}</span>
+            <div style={{ marginBottom: "20px" }}>
+              <h2>Olá, {currentUser?.nome}</h2>
+              <p style={{ color: DARK.mut }}>{currentUser?.admin ? "Painel Administrativo" : "Operador"}</p>
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
               <button style={btnStyle()} onClick={() => setView("scan")}>LER QR</button>
@@ -184,51 +167,35 @@ export default function App() {
                 setView("notificacoes");
               }}>AVISOS</button>
             </div>
+
             {currentUser?.admin && (
-              <button style={btnStyle("#ff9800")} onClick={async () => {
-                const s = await getDocs(collection(db, "users"));
-                setLista(s.docs.map(d => d.data()));
-                setView("usuarios");
-              }}>GESTÃO DE USUÁRIOS</button>
+              <button style={btnStyle(DARK.orange)} onClick={carregarUsuarios}>
+                GESTÃO DE USUÁRIOS
+              </button>
             )}
-            <button style={btnStyle("#444")} onClick={() => setView("login")} style={{marginTop: "20px"}}>SAIR</button>
+
+            <button style={{ ...btnStyle("#444"), marginTop: "30px" }} onClick={() => setView("login")}>SAIR</button>
           </>
         )}
 
-        {view === "cadastrar" && (
-          <>
-            <h3>Novo Veículo</h3>
-            <div style={cardStyle}>
-              <input placeholder="Chassi" style={inputStyle} value={chassi} onChange={e => setChassi(e.target.value.toUpperCase())} />
-              <input placeholder="Modelo" style={inputStyle} onChange={e => setModelo(e.target.value)} />
-              <input placeholder="Ano" style={inputStyle} onChange={e => setAno(e.target.value)} />
-              <input placeholder="Cor" style={inputStyle} onChange={e => setCor(e.target.value)} />
-              <button style={btnStyle(DARK.ok)} onClick={async () => {
-                const id = chassi.trim();
-                const dPayload = { chassi: id, modelo, ano, cor, status: "Entrada", updatedAt: serverTimestamp() };
-                await setDoc(doc(db, "vehicles", id), dPayload);
-                await addDoc(collection(db, "movements"), { chassi: id, tipo: "Entrada", user: currentUser.nome, createdAt: serverTimestamp() });
-                if (window.confirm("Cadastrado! Baixar etiqueta?")) gerarPDF(dPayload);
-                irParaHome();
-              }}>SALVAR</button>
-              <button style={btnStyle("#555")} onClick={irParaHome}>VOLTAR</button>
-            </div>
-          </>
-        )}
-
+        {/* GESTÃO DE USUÁRIOS */}
         {view === "usuarios" && (
           <>
             <h3>Gestão de Usuários</h3>
             <div style={cardStyle}>
-              <input placeholder="Nome" style={inputStyle} value={newUser} onChange={e => setNewUser(e.target.value)} />
+              <p style={{marginBottom: "10px"}}>Novo Funcionário:</p>
+              <input placeholder="Login" style={inputStyle} value={newUser} onChange={e => setNewUser(e.target.value)} />
               <input placeholder="Senha" style={inputStyle} value={newPass} onChange={e => setNewPass(e.target.value)} />
               <label style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "15px" }}>
-                <input type="checkbox" checked={newIsAdmin} onChange={e => setNewIsAdmin(e.target.checked)} /> É Administrador?
+                <input type="checkbox" checked={newIsAdmin} onChange={e => setNewIsAdmin(e.target.checked)} />
+                É Administrador?
               </label>
-              <button style={btnStyle(DARK.ok)} onClick={createUser}>CRIAR CONTA</button>
+              <button style={btnStyle(DARK.ok)} onClick={salvarNovoUsuario}>CRIAR CONTA</button>
             </div>
+
+            <p style={{margin: "10px 0"}}>Usuários Ativos:</p>
             {lista.map((u, i) => (
-              <div key={i} style={{ ...cardStyle, padding: "12px", display: "flex", justifyContent: "space-between" }}>
+              <div key={i} style={{ ...cardStyle, padding: "12px", marginBottom: "8px", display: "flex", justifyContent: "space-between" }}>
                 <span>{u.nome}</span>
                 <span style={{ fontSize: "12px", color: DARK.mut }}>{u.admin ? "👑 Admin" : "Operador"}</span>
               </div>
@@ -237,22 +204,44 @@ export default function App() {
           </>
         )}
 
+        {/* CADASTRO DE VEÍCULO */}
+        {view === "cadastrar" && (
+          <div style={cardStyle}>
+            <h3>Novo Veículo</h3>
+            <input placeholder="Chassi" style={inputStyle} value={chassi} onChange={e => setChassi(e.target.value.toUpperCase())} />
+            <input placeholder="Modelo" style={inputStyle} onChange={e => setModelo(e.target.value)} />
+            <input placeholder="Ano" style={inputStyle} onChange={e => setAno(e.target.value)} />
+            <input placeholder="Cor" style={inputStyle} onChange={e => setCor(e.target.value)} />
+            <button style={btnStyle(DARK.ok)} onClick={async () => {
+              const id = chassi.trim();
+              if(!id) return alert("Chassi obrigatório");
+              const d = { chassi: id, modelo, ano, cor, status: "Entrada", updatedAt: serverTimestamp() };
+              await setDoc(doc(db, "vehicles", id), d);
+              await addDoc(collection(db, "movements"), { chassi: id, tipo: "Entrada", user: currentUser.nome, createdAt: serverTimestamp() });
+              if (window.confirm("Salvo! Baixar PDF?")) gerarPDF(d);
+              irParaHome();
+            }}>SALVAR VEÍCULO</button>
+            <button style={btnStyle("#555")} onClick={irParaHome}>VOLTAR</button>
+          </div>
+        )}
+
+        {/* ESTOQUE */}
         {view === "historico" && (
           <>
-            <h3>Estoque Atual</h3>
-            <input placeholder="Filtrar Chassi..." style={inputStyle} onChange={e => setFiltro(e.target.value.toUpperCase())} />
+            <h3>Estoque</h3>
+            <input placeholder="Buscar Chassi..." style={inputStyle} onChange={e => setFiltro(e.target.value.toUpperCase())} />
             {lista.filter(v => v.chassi.includes(filtro)).map((v, i) => (
               <div key={i} style={cardStyle}>
-                <b>{v.modelo}</b> <br/>
-                <small style={{color: DARK.mut}}>{v.chassi}</small>
-                <div style={{marginTop: "10px", color: DARK.ok}}>{v.status}</div>
-                <button style={{...btnStyle(DARK.blue), padding: "8px", marginTop: "10px", fontSize: "12px"}} onClick={() => gerarPDF(v)}>REIMPRIMIR ETIQUETA</button>
+                <b>{v.modelo}</b> - {v.status}
+                <div style={{ fontSize: "12px", color: DARK.mut }}>{v.chassi}</div>
+                <button style={{ ...btnStyle(DARK.blue), padding: "8px", marginTop: "10px", fontSize: "12px" }} onClick={() => gerarPDF(v)}>REIMPRIMIR ETIQUETA</button>
               </div>
             ))}
             <button style={btnStyle("#555")} onClick={irParaHome}>VOLTAR</button>
           </>
         )}
 
+        {/* SCANNER */}
         {view === "scan" && (
           <div style={cardStyle}>
             <h3>Scanner</h3>
@@ -261,21 +250,22 @@ export default function App() {
               const reader = new BrowserMultiFormatReader();
               scannerRef.current = reader;
               const devices = await BrowserMultiFormatReader.listVideoInputDevices();
+              if(!devices.length) return alert("Câmera não encontrada");
               reader.decodeFromVideoDevice(devices[0].deviceId, videoRef.current, (res) => { if (res) setScanText(res.text); });
             }}>LIGAR CÂMERA</button>}
             
             {scanText && (
               <div>
-                <p>Veículo: <b>{scanText}</b></p>
+                <p>Chassi: <b>{scanText}</b></p>
                 <select style={inputStyle} value={setorEscolhido} onChange={e => setSetorEscolhido(e.target.value)}>
                    {SETORES.map(s => <option key={s} value={s}>{s}</option>)}
                 </select>
                 <button style={btnStyle(DARK.ok)} onClick={async () => {
                    await updateDoc(doc(db, "vehicles", scanText), { status: setorEscolhido, updatedAt: serverTimestamp() });
                    await addDoc(collection(db, "movements"), { chassi: scanText, tipo: setorEscolhido, user: currentUser.nome, createdAt: serverTimestamp() });
-                   alert("Movimentação registrada!");
+                   alert("Atualizado!");
                    irParaHome();
-                }}>CONFIRMAR</button>
+                }}>CONFIRMAR MUDANÇA</button>
               </div>
             )}
             <button style={btnStyle("#555")} onClick={irParaHome}>VOLTAR</button>
@@ -285,5 +275,6 @@ export default function App() {
       </div>
     </div>
   );
+}
 }
 
